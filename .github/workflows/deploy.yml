@@ -1,0 +1,107 @@
+# Deploy workflow - triggered on push to main
+# Reports deployment events to Dynatrace
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test --if-present
+
+      - name: Security audit
+        run: |
+          npm audit --audit-level=critical || echo "Vulnerabilities found"
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install production dependencies
+        run: npm ci --production
+
+      - name: Get app version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Get lodash version
+        id: lodash
+        run: echo "version=$(node -p "require('lodash/package.json').version")" >> $GITHUB_OUTPUT
+
+      # Deploy to your server (customize this section)
+      - name: Deploy to production
+        run: |
+          echo "🚀 Deploying ChaosApp v${{ steps.version.outputs.version }}"
+          echo "📦 Lodash version: ${{ steps.lodash.outputs.version }}"
+          # Add your actual deployment commands here:
+          # - SSH to server and pull latest
+          # - Docker build and push
+          # - Azure/AWS/GCP deployment
+          # - PM2 restart
+          echo "✅ Deployment complete"
+
+      # Report deployment event to Dynatrace
+      - name: Send deployment event to Dynatrace
+        if: ${{ secrets.DYNATRACE_URL != '' && secrets.DYNATRACE_TOKEN != '' }}
+        run: |
+          curl -X POST "${{ secrets.DYNATRACE_URL }}/api/v2/events/ingest" \
+            -H "Authorization: Api-Token ${{ secrets.DYNATRACE_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "eventType": "CUSTOM_DEPLOYMENT",
+              "title": "ChaosApp Deployment",
+              "entitySelector": "type(PROCESS_GROUP),entityName.contains(ChaosApp)",
+              "properties": {
+                "dt.event.deployment.name": "ChaosApp",
+                "dt.event.deployment.version": "${{ steps.version.outputs.version }}",
+                "dt.event.deployment.release_stage": "production",
+                "dt.event.deployment.remediation_action_type": "Automated",
+                "approver": "${{ github.actor }}",
+                "changelog": "${{ github.event.head_commit.message }}",
+                "source": "GitHub Actions",
+                "commit": "${{ github.sha }}",
+                "lodash_version": "${{ steps.lodash.outputs.version }}"
+              }
+            }'
+          echo "📊 Deployment event sent to Dynatrace"
+
+      - name: Deployment summary
+        run: |
+          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Lodash | ${{ steps.lodash.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Actor | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
