@@ -19,7 +19,7 @@
   "author": "Demo",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
+    "express": "^4.22.2",
     "lodash": "4.17.20",
     "axios": "^1.13.5",
     "dotenv": "^16.3.1",
